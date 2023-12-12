@@ -1,13 +1,15 @@
-# 前言
+# tensorflow-custom-op
 
 制作过程基于tensorflow官方的custom-op仓库以及官网教程，并且在Ubuntu和MacOS系统通过了测试：
 
 - git仓库：https://github.com/tensorflow/custom-op
 - 官网教程：https://www.tensorflow.org/guide/create_op
 
-官方提供的案例虽然也涵盖了整个流程，但是它过于简单，自己遇到其他需求的实现可能还得去翻阅资料。而基于[二进制码Hash编码](https://zhuanlan.zhihu.com/p/670802301)的算子实现，是能够满足大部分自定义需求的，并且**经过测试是支持tensorflow1.x和2.x的**。
+官方提供的案例虽然也涵盖了整个流程，但是它过于简单，自己遇到其他需求的实现可能还得去翻阅资料。
 
-# 目录结构
+而基于[二进制码Hash编码](https://zhuanlan.zhihu.com/p/670802301)的算子实现，是能够满足大部分自定义需求的，并且**经过测试是支持tensorflow1.x和2.x的**。
+
+## 目录结构
 
 整个项目的目录结构如下，下面会对每一个文件进行讲述其作用：
 
@@ -32,13 +34,13 @@
             └── binary_code_hash_test.py
 ```
 
-# 前置依赖
+## 前置依赖
 
 - make
 - g++
 - cuda
 
-## tensorflow
+### tensorflow
 
 **无需源码安装，pip安装的情况下已通过测试。**
 
@@ -58,9 +60,9 @@
 
 3. 当然，你仍然可以选择源码编译安装: https://www.tensorflow.org/install/source
 
-# Step1. 定义运算接口
+## Step1. 定义运算接口
 
-对应文件：**`tensorflow_binary_code_hash/cc/ops/binary_code_hash_ops.cc`**。
+对应文件：**[tensorflow_binary_code_hash/cc/ops/binary_code_hash_ops.cc](tensorflow_binary_code_hash/cc/ops/binary_code_hash_ops.cc)**。
 
 在这里，你可以定义算子所需要的输入，和设置输出的格式。接口内容如下，主要包括两个部分：
 
@@ -94,7 +96,7 @@ int length;
 c->GetAttr("length", &length);
 ```
 
-再有获取输入的信息和输入的校验，最后指定输出的shape，在这里，**可以定义动态shape，即有些维度可以是未知的size，用-1表示**。
+再有获取输入的信息和输入的校验，最后指定输出的shape。在这里，**如果需要的话，甚至可以定义动态shape，即有些维度可以是未知的size，用-1表示**。
 
 ```c++
 // 获取输入张量的形状，并检验输入的维度数>=1
@@ -113,13 +115,13 @@ output_shape.push_back(c->MakeDim(block_num));
 c->set_output(0, c->MakeShape(output_shape));
 ```
 
-# Step2. 实现运算内核
+## Step2. 实现运算内核
 
-## Step2.1 定义计算接口
+### Step2.1 定义计算接口
 
-对应文件：**`tensorflow_binary_code_hash/cc/kernels/binary_code_hash.h`**。
+对应文件：**[tensorflow_binary_code_hash/cc/kernels/binary_code_hash.h](tensorflow_binary_code_hash/cc/kernels/binary_code_hash.h)**。
 
-这里其实类似于头文件，只包括计算逻辑的仿函数(函数对象)BinaryCodeHashFunctor的声明，没有具体实现。
+这里其实类似于头文件，只包括计算逻辑的仿函数(函数对象)BinaryCodeHashFunctor的**声明，没有具体实现**。
 
 包括输入张量in和输出张量out，其他则是一些非张量参数。**这里其他参数对于到时cuda运算内核就很重要，因为cuda显存的数据其实都是从内存拷贝过去的，即这些参数对应的实参，因此仿函数的参数要齐全。**
 
@@ -137,15 +139,15 @@ struct BinaryCodeHashFunctor {
 }  // namespace tensorflow
 ```
 
-## Step2.1 cpu运算内核
+### Step2.2 cpu运算内核
 
-对应文件：**`tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cc`**。这里主要包括三部分：
+对应文件：**[tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cc](tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cc)**。这里主要包括三部分：
 
 1. 计算逻辑的仿函数具体实现
 2. 运算内核的实现类
 3. 内核注册
 
-### 计算仿函数
+#### 计算仿函数实现
 
 在这里实现BinaryCodeHashFunctor具体的计算逻辑，输入张量的数据通过指针变量in来访问，然后将计算结果写入到输出张量对应的指针变量out。
 
@@ -156,11 +158,12 @@ struct BinaryCodeHashFunctor {
 template <typename T>
 struct BinaryCodeHashFunctor<CPUDevice, T> {
   void operator()(const CPUDevice& d, int size, const T* in, T* out, int length, int t, bool succession) {
+    // 实现自己的计算逻辑
   }
 };
 ```
 
-### 内核实现类
+#### 内核实现类
 
 在这里，运算内核实现类需要继承OpKernel，如下面的代码
 
@@ -177,9 +180,11 @@ template <typename Device, typename T>
 class BinaryCodeHashOp : public OpKernel {
  public:
   explicit BinaryCodeHashOp(OpKernelConstruction* context) : OpKernel(context) {
+    // 参数校验
   }
 
   void Compute(OpKernelContext* context) override {
+    // 实现自己的内核逻辑
   }
 
   private:
@@ -231,9 +236,9 @@ BinaryCodeHashFunctor<Device, T>()(
         length_, t_, strategy_ == "succession");
 ```
 
-### 内核注册
+#### 内核注册
 
-**CPU和CPU内核都需要在这里进行注册。** 
+**CPU和CPU内核都需要在这个c++文件中进行注册。** 
 
 这里还包括对上面`运算接口定义(tensorflow_binary_code_hash/cc/ops/binary_code_hash_ops.cc)`中的T进行约束，因为上面Attr中的T不属于算子函数的参数，因此需要在这里进行对应指定int32和int64。
 
@@ -256,16 +261,16 @@ REGISTER_GPU(int32);
 REGISTER_GPU(int64);
 ```
 
-## Step2.1 cuda运算内核
+### Step2.3 cuda运算内核
 
-对应文件：**`tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cu.cc`**。
+对应文件：**[tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cu.cc](tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cu.cc)**。
 
 这里需要包括两个东西：
 
 1. CUDA计算内核
 2. BinaryCodeHashFunctor仿函数的具体实现
 
-### CUDA计算内核
+#### CUDA计算内核
 
 这是属于CUDA的核函数，带有声明符号`__global__`。与前面CPU内核中的计算仿函数类似，输入张量的数据通过指针变量in来访问，然后将计算结果写入到输出张量对应的指针变量out。但不同的是输入张量的访问涉及到CUDA中的grid、block和线程的关系，下面的代码则是简单地实现了所有数据的遍历。
 
@@ -276,13 +281,14 @@ template <typename T>
 __global__ void BinaryCodeHashCudaKernel(const int size, const T* in, T* out, int length, int t, bool succession) {
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < size;
        i += blockDim.x * gridDim.x) {
+    // 实现自己的计算逻辑
     // out[i] = 2 * ldg(in + i);
 }
 ```
 
-### CUDA内核仿函数
+#### CUDA内核仿函数
 
-在这里定义了CUDA计算内核的启动，其实跟上述的CPU内核实现类，即`tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cc`中的Compute重载函数。只是不同的是这里不需要获取输入和参数，因为CUDA是直接由CPU内存拷贝过去。
+在这里定义了CUDA计算内核的启动，其实跟上述的CPU内核实现类，即 **[tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cc](tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cc)** 中的Compute重载函数。只是不同的是这里不需要获取输入和参数，因为CUDA是直接由CPU内存拷贝过去。
 
 ```c++
 // Define the GPU implementation that launches the CUDA kernel.
@@ -302,39 +308,23 @@ struct BinaryCodeHashFunctor<GPUDevice, T> {
 };
 ```
 
-# Step3. 编译
+## Step3. 编译
 
-对应文件：**`Makefile`**。
+对应文件：**[Makefile](https://github.com/QunBB/tensorflow-custom-op/blob/main/Makefile)**。
 
-```makefile
-CXX := g++
+执行以下命令对算子源文件进行编译，就可以得到相关的so文件，包括:  **`tensorflow_binary_code_hash/python/ops/_binary_code_hash_ops.so`**、**`tensorflow_binary_code_hash/python/ops/_binary_code_hash_ops.cu.o`**。
 
-# 待编译的算子源码文件
-BINARY_CODE_HASH_SRCS = tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cc $(wildcard tensorflow_binary_code_hash/cc/kernels/*.h) $(wildcard tensorflow_binary_code_hash/cc/ops/*.cc)
+```sh
+make clean
 
-# 获取tensorflow的c++源码位置
-TF_CFLAGS := $(shell $(PYTHON_BIN_PATH) -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_compile_flags()))')
-TF_LFLAGS := $(shell $(PYTHON_BIN_PATH) -c 'import tensorflow as tf; print(" ".join(tf.sysconfig.get_link_flags()))')
-
-# 对于新版本的tensorflow, 需要使用新标准, 比如tensorflow2.10则需指定-std=c++17
-CFLAGS = ${TF_CFLAGS} -fPIC -O2 -std=c++11
-LDFLAGS = -shared ${TF_LFLAGS}
-
-# 编译目标so文件位置
-BINARY_CODE_HASH_GPU_ONLY_TARGET_LIB = tensorflow_binary_code_hash/python/ops/_binary_code_hash_ops.cu.o
-BINARY_CODE_HASH_TARGET_LIB = tensorflow_binary_code_hash/python/ops/_binary_code_hash_ops.so
-
-# 编译命令: binary_code_hash op
-binary_code_hash_op: $(BINARY_CODE_HASH_TARGET_LIB)
-$(BINARY_CODE_HASH_TARGET_LIB): $(BINARY_CODE_HASH_SRCS) $(BINARY_CODE_HASH_GPU_ONLY_TARGET_LIB)
-	$(CXX) $(CFLAGS) -o $@ $^ ${LDFLAGS}  -D GOOGLE_CUDA=1  -I/usr/local/cuda/targets/x86_64-linux/include -L/usr/local/cuda/targets/x86_64-linux/lib -lcudart
+make binary_code_hash_op
 ```
 
-执行 `make binary_code_hash_op` 对算子源文件进行编译，就可以得到相关的so文件，包括*BINARY_CODE_HASH_GPU_ONLY_TARGET_LIB*、*BINARY_CODE_HASH_TARGET_LIB*。
+## Step4. Python调用
 
-# Python调用
+对应文件：**[tensorflow_binary_code_hash/python/ops/binary_code_hash_ops.py](tensorflow_binary_code_hash/python/ops/binary_code_hash_ops.py)、[tensorflow_binary_code_hash/python/ops/binary_code_hash_test.py](tensorflow_binary_code_hash/python/ops/binary_code_hash_test.py)**。
 
-对应文件：**`tensorflow_binary_code_hash/python/ops/binary_code_hash_ops.py`、`tensorflow_binary_code_hash/python/ops/binary_code_hash_test.py`**。
+**生成了算子的so文件之后，我们就可以在Python中引入自定义的算子函数进行使用。**
 
 在这两个Python文件中，包括了算子的调用和算子执行的测试单元。其中最为关键的算子导入代码如下：
 
@@ -349,12 +339,12 @@ binary_code_hash = binary_code_hash_ops.binary_code_hash
 
 可以直接使用make执行测试脚本：`make binary_code_hash_test`。也可以选择进入目录，手动执行Python脚本。
 
-# CPU版本
+## CPU版本
 
 对于没有GPU资源的小伙伴，也提供了纯CPU版本的算子实现。
 
-- 定义运算接口与GPU版本通用：**`tensorflow_binary_code_hash/cc/ops/binary_code_hash_ops.cc`**。
-- 实现运算内核则对应文件：**`tensorflow_binary_code_hash/cc/kernels/binary_code_hash_only_cpu_kernels.cc`**
+- 定义运算接口与GPU版本通用：**[tensorflow_binary_code_hash/cc/ops/binary_code_hash_ops.cc](tensorflow_binary_code_hash/cc/ops/binary_code_hash_ops.cc)**
+- 实现运算内核则对应文件：**[tensorflow_binary_code_hash/cc/kernels/binary_code_hash_only_cpu_kernels.cc](tensorflow_binary_code_hash/cc/kernels/binary_code_hash_only_cpu_kernels.cc)**
 - 其编译命令也包含在Makefile文件中，对应执行：**`make binary_code_hash_cpu_only`**
 - 最终生成的so文件则是：**`tensorflow_binary_code_hash/python/ops/_binary_code_hash_cpu_ops.so`**
 
