@@ -64,7 +64,9 @@
 
 对应文件：**[tensorflow_binary_code_hash/cc/ops/binary_code_hash_ops.cc](tensorflow_binary_code_hash/cc/ops/binary_code_hash_ops.cc)**。
 
-在这里，你可以定义算子所需要的输入，和设置输出的格式。接口内容如下，主要包括两个部分：
+这里需要将接口注册到 TensorFlow 系统，通过对 `REGISTER_OP` 宏的调用来可以定义运算的接口。
+
+你可以在这里定义算子所需要的输入，和设置输出的格式。接口内容如下，主要包括两个部分：
 
 1. 定义输入。Input部分为输入张量，Attr部分是其他非张量的参数，Output则是输出张量。规定了输入张量hash_id和输出张量bh_id的类型是T，T为32位和64位的整型。strategy参数则是枚举，只能是succession或者skip；
 2. 在Lmabdas函数体里面可以定义输出的shape。
@@ -83,6 +85,7 @@ REGISTER_OP("BinaryCodeHash")
     .Attr("strategy: {'succession', 'skip'}")
     .Output("bh_id: T")
     .SetShapeFn([](::tensorflow::shape_inference::InferenceContext* c) {
+      // 这里进行输入的校验和指定输出的shape
       return Status::OK();
     });
 ```
@@ -117,11 +120,11 @@ c->set_output(0, c->MakeShape(output_shape));
 
 ## Step2. 实现运算内核
 
-### Step2.1 定义计算接口
+### Step2.1 定义计算头文件
 
 对应文件：**[tensorflow_binary_code_hash/cc/kernels/binary_code_hash.h](tensorflow_binary_code_hash/cc/kernels/binary_code_hash.h)**。
 
-这里其实类似于头文件，只包括计算逻辑的仿函数(函数对象)BinaryCodeHashFunctor的**声明，没有具体实现**。
+这里是C++的头文件，只包括计算逻辑的仿函数(函数对象)BinaryCodeHashFunctor的**声明，没有具体实现**。
 
 包括输入张量in和输出张量out，其他则是一些非张量参数。**这里其他参数对于到时cuda运算内核就很重要，因为cuda显存的数据其实都是从内存拷贝过去的，即这些参数对应的实参，因此仿函数的参数要齐全。**
 
@@ -147,7 +150,7 @@ struct BinaryCodeHashFunctor {
 2. 运算内核的实现类
 3. 内核注册
 
-#### 计算仿函数实现
+#### 2.2.1 计算仿函数实现
 
 在这里实现BinaryCodeHashFunctor具体的计算逻辑，输入张量的数据通过指针变量in来访问，然后将计算结果写入到输出张量对应的指针变量out。
 
@@ -163,7 +166,7 @@ struct BinaryCodeHashFunctor<CPUDevice, T> {
 };
 ```
 
-#### 内核实现类
+#### 2.2.2 内核实现类
 
 在这里，运算内核实现类需要继承OpKernel，如下面的代码
 
@@ -236,7 +239,7 @@ BinaryCodeHashFunctor<Device, T>()(
         length_, t_, strategy_ == "succession");
 ```
 
-#### 内核注册
+#### 2.2.3 内核注册
 
 **CPU和CPU内核都需要在这个c++文件中进行注册。** 
 
@@ -270,7 +273,7 @@ REGISTER_GPU(int64);
 1. CUDA计算内核
 2. BinaryCodeHashFunctor仿函数的具体实现
 
-#### CUDA计算内核
+#### 2.3.1 CUDA计算内核
 
 这是属于CUDA的核函数，带有声明符号`__global__`。与前面CPU内核中的计算仿函数类似，输入张量的数据通过指针变量in来访问，然后将计算结果写入到输出张量对应的指针变量out。但不同的是输入张量的访问涉及到CUDA中的grid、block和线程的关系，下面的代码则是简单地实现了所有数据的遍历。
 
@@ -286,7 +289,7 @@ __global__ void BinaryCodeHashCudaKernel(const int size, const T* in, T* out, in
 }
 ```
 
-#### CUDA内核仿函数
+#### 2.3.2 CUDA内核仿函数
 
 在这里定义了CUDA计算内核的启动，其实跟上述的CPU内核实现类，即 **[tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cc](tensorflow_binary_code_hash/cc/kernels/binary_code_hash_kernels.cc)** 中的Compute重载函数。只是不同的是这里不需要获取输入和参数，因为CUDA是直接由CPU内存拷贝过去。
 
